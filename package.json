@@ -5,6 +5,7 @@
     "express": "^5.1.0",
     "node-fetch": "^3.3.2",
     "node-youtube-music": "^0.10.3",
+    "string-similarity": "^4.0.4",
     "youtube-music-api": "^1.0.6",
     "youtube-sr": "^4.3.12"
   },

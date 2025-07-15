@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const YoutubeMusicApi = require("youtube-music-api");
+const stringSimilarity = require("string-similarity");
 
 dotenv.config();
 const app = express();
@@ -39,7 +40,20 @@ setInterval(refreshSpotifyToken, 55 * 60 * 1000);
 function normalize(text) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9 ]/gi, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[^a-z0-9\s]/g, "") // remove non-alphanumeric
+    .trim();
+}
+
+// ✅ Clean spotfify title
+function cleanTitle(title) {
+  return title
+    .replace(/\(.*?\)/g, "") // Remove anything inside parentheses
+    .replace(/\[.*?\]/g, "") // Remove anything inside brackets
+    .replace(/feat\..*/i, "") // Remove feat. info if in title
+    .replace(/ft\..*/i, "") // Remove ft. info
+    .toLowerCase()
     .trim();
 }
 
@@ -104,6 +118,7 @@ app.get("/api/spotify-search", async (req, res) => {
         artist: track.artists.map((a) => a.name).join(", "),
         album: track.album.name,
         image: track.album.images[0]?.url,
+        duration: track.duration_ms,
         preview_url: track.preview_url,
         spotify_url: track.external_urls.spotify,
         popularity: track.popularity,
@@ -146,7 +161,7 @@ app.get("/api/youtube-search", async (req, res) => {
 
     const results = (response.content || []).map((item) => {
       const title = normalize(item.name || "");
-      const artist = normalize(item.artist?.name || "");
+      const artist = normalize(item.artist.name || "");
       const input = parseInput(query);
       const inputTitle = normalize(input.song);
       const inputArtist = normalize(input.artist);
@@ -155,13 +170,33 @@ app.get("/api/youtube-search", async (req, res) => {
 
       if (title === inputTitle) score += 20;
       if (artist === inputArtist) score += 15;
-      if (title.includes(inputTitle)) score += 5;
-      if (artist.includes(inputArtist)) score += 8;
+
+      inputTitle.split(" ").forEach((word) => {
+        if (title.includes(word)) score += 5;
+      });
+
+      inputArtist.split(" ").forEach((word) => {
+        if (artist.includes(inputArtist)) score += 4;
+      });
+
+      const titleSimilarity = stringSimilarity.compareTwoStrings(
+        title,
+        inputTitle
+      );
+      const artistSimilarity = stringSimilarity.compareTwoStrings(
+        artist,
+        inputArtist
+      );
+
+      if (titleSimilarity > 0.8) score += 15;
+      if (artistSimilarity > 0.8) score += 10;
 
       return {
         videoId: item.videoId,
         name: item.name,
-        artist: item.artist?.name,
+        artist: item.artist.name,
+        duration: item.duration,
+        thumbnails: item.thumbnails,
         score,
       };
     });
