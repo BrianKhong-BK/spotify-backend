@@ -39,10 +39,9 @@ setInterval(refreshSpotifyToken, 55 * 60 * 1000);
 // ✅ Normalize utility
 function normalize(text) {
   return text
+    .replace(/\((\s*prod\.|feat\.|ft\.).*?\)/i, "")
+    .replace(/[\[\]\(\)]/g, "")
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove accents
-    .replace(/[^a-z0-9\s]/g, "") // remove non-alphanumeric
     .trim();
 }
 
@@ -71,7 +70,7 @@ app.get("/api/spotify-search", async (req, res) => {
       };
     });
 
-    res.json(results);
+    res.json(data.tracks.items);
   } catch (err) {
     console.error("❌ Spotify search failed:", err);
     res.status(500).json({ error: "Spotify search failed" });
@@ -80,15 +79,9 @@ app.get("/api/spotify-search", async (req, res) => {
 
 function parseInput(input) {
   const parts = input.split(" : ");
-  if (parts.length === 2) {
-    return {
-      song: parts[0].trim(),
-      artist: parts[1].trim(),
-    };
-  }
   return {
-    artist: "",
-    song: input.trim(),
+    song: parts[0],
+    artist: parts[1],
   };
 }
 
@@ -97,25 +90,26 @@ app.get("/api/youtube-search", async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: "Missing query" });
 
-  const spotifyInput = parseInput(query); // Assume this returns { title, artist, durationMs }
+  const spotifyInput = parseInput(query);
 
-  console.log(query);
   const api = new YoutubeMusicApi();
 
   try {
     await api.initalize();
-    const response = await api.search(query, "song");
+    const response = await api.search(
+      `${normalize(spotifyInput.song)} ${spotifyInput.artist}`,
+      "song"
+    );
     const results = response.content;
 
-    // Score and sort results
     const scoredResults = results
       .map((track) => {
         const score = calculateMatchScore(track, spotifyInput);
         return { ...track, score };
       })
-      .sort((a, b) => b.score - a.score); // Sort by highest score
+      .sort((a, b) => b.score - a.score);
 
-    res.json({ results: scoredResults[0] });
+    res.json({ results: scoredResults });
   } catch (err) {
     console.error("❌ YouTube Music API failed:", err);
     res.status(500).json({ error: "YouTube search failed" });
@@ -127,20 +121,37 @@ function calculateMatchScore(youtubeTrack, spotifyInput) {
   let score = 0;
 
   // 1. Title Match (Case-Insensitive)
-  const youtubeTitle = youtubeTrack.name?.toLowerCase() || "";
-  const youtubeArtist = youtubeTrack.artist.name?.toLowerCase() || "";
-  const spotifyTitle = spotifyInput.song?.toLowerCase() || "";
-  const spotifyArtist = spotifyInput.artist?.toLowerCase() || "";
+  const youtubeTitle = normalize(youtubeTrack.name);
+  const youtubeArtist =
+    youtubeTrack.artist.length === 0
+      ? youtubeTrack.album.name
+      : Array.isArray(youtubeTrack.artist)
+      ? youtubeTrack.artist.map((a) => a.name).toString()
+      : youtubeTrack.artist.name;
+  const spotifyTitle = normalize(spotifyInput.song);
+  const spotifyArtist = spotifyInput.artist;
 
   if (youtubeTitle === spotifyTitle) score += 20;
   if (youtubeArtist === spotifyArtist) score += 15;
 
   spotifyTitle.split(" ").forEach((word) => {
     if (youtubeTitle.includes(word)) score += 5;
+    else score -= 5;
   });
 
-  spotifyArtist.split(" ").forEach((word) => {
+  spotifyArtist.split(",").forEach((word) => {
     if (youtubeArtist.includes(word)) score += 4;
+    else score -= 4;
+  });
+
+  youtubeTitle.split(" ").forEach((word) => {
+    if (spotifyTitle.includes(word)) score += 5;
+    else score -= 5;
+  });
+
+  youtubeArtist.split(",").forEach((word) => {
+    if (spotifyArtist.includes(word)) score += 4;
+    else score -= 4;
   });
 
   const titleSimilarity = stringSimilarity.compareTwoStrings(
@@ -153,7 +164,10 @@ function calculateMatchScore(youtubeTrack, spotifyInput) {
   );
 
   if (titleSimilarity > 0.8) score += 15;
+  else score -= 15;
+
   if (artistSimilarity > 0.8) score += 10;
+  else score -= 10;
 
   return score;
 }
