@@ -70,7 +70,7 @@ app.get("/api/spotify-search", async (req, res) => {
       };
     });
 
-    res.json(data.tracks.items);
+    res.json(results);
   } catch (err) {
     console.error("❌ Spotify search failed:", err);
     res.status(500).json({ error: "Spotify search failed" });
@@ -104,8 +104,24 @@ app.get("/api/youtube-search", async (req, res) => {
 
     const scoredResults = results
       .map((track) => {
+        const videoId = track.videoId;
+        const name = track.name;
+        const artist =
+          track.artist.length === 0
+            ? track.album.name
+            : Array.isArray(track.artist)
+            ? track.artist.map((a) => a.name).toString()
+            : track.artist.name;
+        const thumbnails = track.thumbnails[0].url;
+
         const score = calculateMatchScore(track, spotifyInput);
-        return { ...track, score };
+        return {
+          videoId,
+          name,
+          artist,
+          thumbnails,
+          score,
+        };
       })
       .sort((a, b) => b.score - a.score);
 
